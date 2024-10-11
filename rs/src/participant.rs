@@ -1,12 +1,10 @@
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::str::EncodeUtf16;
 
 use super::error::SecretSantaError;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq, Clone)]
 pub struct Participant {
     pub name: String,
     pub paired_with: Option<String>,
@@ -14,45 +12,87 @@ pub struct Participant {
 }
 
 impl PartialEq for Participant {
+    // Only need name to match as name is the unique id
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
 
+impl PartialEq<Participant> for String {
+    fn eq(&self, other: &Participant) -> bool {
+        self == &other.name
+    }
+}
+
+impl PartialEq<String> for Participant {
+    fn eq(&self, other: &String) -> bool {
+        &self.name == other
+    }
+}
+
 impl Hash for Participant {
+    // Only need name in hash as it is the unique bit
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
+    }
+}
+
+impl Participant {
+    /// Returns a set of possible matches based on conditions
+    pub fn find_matches(&self, names: &HashSet<String>) -> HashSet<String> {
+        // Create a set to store filtered results
+        let mut matches: HashSet<String> = HashSet::new();
+
+        for p in names {
+            // check if the p is not equal to self or in blocklist
+            if &self.name != p && !self.blocklist.as_ref().map_or(false, |bl| bl.contains(p)) {
+                matches.insert(p.clone());
+            }
+        }
+        matches
+    }
+
+    pub fn new(name: String) -> Self {
+        Participant {
+            name,
+            blocklist: None,   // Default to None
+            paired_with: None, // Default to None
+        }
+    }
+
+    pub fn set_paired_with(&mut self, pairing: Option<String>) {
+        self.paired_with = pairing;
     }
 }
 
 /// Removes comments starting with # from a line of instruction
 fn get_instruction(instruction: &str) -> Option<&str> {
     let re = Regex::new(r"(^[^#]+)").unwrap();
-    let Some((_, [instr])) = re.captures(&instruction).map(|cap| cap.extract()) else {
+    let Some((_, [inst])) = re.captures(&instruction).map(|cap| cap.extract()) else {
         return None;
     };
-    Some(instr.trim())
+    Some(inst.trim())
 }
 
-/// Get the name of the recipient
-fn parse_recipient(instruction: &str) -> Result<&str, SecretSantaError> {
+/// Get the name of the participant
+fn parse_participant(instruction: &str) -> Result<&str, SecretSantaError> {
     let re = Regex::new(r"(^[^=!#]+)").unwrap();
-    let Some((_, [recipient])) = re.captures(instruction.trim()).map(|cap| cap.extract()) else {
+    let Some((_, [participant])) = re.captures(instruction.trim()).map(|cap| cap.extract()) else {
         return Err(SecretSantaError::new(format!(
-            "Could not determine recipient from: {}",
+            "Could not determine participant from: {}",
             instruction
         )));
     };
     // remove surrounding white space
-    Ok(recipient.trim())
+    Ok(participant.trim())
 }
 
-/// Get the forced pairing for recipient, they will be the SecretSanta for this person.
+/// Get the forced pairing for participant, they will be the SecretSanta for this person.
 fn parse_forced_pairing(instruction: &str) -> Option<&str> {
     let re = Regex::new(r"(=[^=!#]+)").unwrap();
     let (_, [giver]) = re.captures(instruction.trim()).map(|cap| cap.extract())?;
 
-    // remove surrounding white space and prfix
+    // remove surrounding white space and prefix
     Some(giver.trim().strip_prefix("=").unwrap())
 }
 
@@ -95,8 +135,8 @@ pub fn parse_instruction(instruction: &str) -> Result<Participant, SecretSantaEr
     // remove comments
     let clean_instr = get_instruction(&instruction).unwrap_or("");
 
-    // recipient err if none or if duplicate
-    let recipient = parse_recipient(clean_instr)?.to_string();
+    // participant err if none or if duplicate
+    let participant = parse_participant(clean_instr)?.to_string();
 
     // blocklist
     let blocklist: Option<HashSet<String>> =
@@ -107,7 +147,7 @@ pub fn parse_instruction(instruction: &str) -> Result<Participant, SecretSantaEr
 
     // return
     Ok(Participant {
-        name: recipient,
+        name: participant,
         paired_with: paired_with,
         blocklist: blocklist,
     })
@@ -118,7 +158,73 @@ mod tests {
 
     use super::*;
 
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
+
+    #[fixture]
+    fn amy() -> Participant {
+        Participant {
+            name: String::from("Amy"),
+            paired_with: None,
+            blocklist: None,
+        }
+    }
+
+    #[fixture]
+    fn ben() -> Participant {
+        Participant {
+            name: String::from("Ben"),
+            paired_with: None,
+            blocklist: Some(HashSet::from(["Amy".to_string()])),
+        }
+    }
+
+    #[fixture]
+    fn tom() -> Participant {
+        Participant {
+            name: String::from("Tom"),
+            paired_with: None,
+            blocklist: Some(HashSet::from(["Amy".to_string(), "Ben".to_string()])),
+        }
+    }
+
+    #[fixture]
+    fn participants(amy: Participant, ben: Participant, tom: Participant) -> HashSet<Participant> {
+        HashSet::from([amy, ben, tom])
+    }
+
+    #[rstest]
+    fn test_struct_participant_eq(amy: Participant) {
+        let other_amy = amy.clone();
+        assert_eq!(amy, other_amy);
+        assert_eq!(amy, "Amy".to_string());
+        assert_eq!("Amy".to_string(), amy);
+    }
+
+    #[rstest]
+    fn test_struct_participant_ne(amy: Participant, ben: Participant) {
+        assert_ne!(amy, ben);
+        assert_ne!(amy, "Ben".to_string());
+        assert_ne!("Ben".to_string(), amy);
+    }
+
+    #[rstest]
+    fn test_hash(amy: Participant, ben: Participant) {
+        let hs = HashSet::from([amy.clone()]);
+        assert!(hs.contains(&amy));
+        assert!(!hs.contains(&ben))
+    }
+
+    #[rstest]
+    fn test_find_matches(amy: Participant, ben: Participant, tom: Participant) {
+        let participants: HashSet<String> =
+            HashSet::from([amy.name.clone(), ben.name.clone(), tom.name.clone()]);
+        let m1 = amy.find_matches(&participants);
+        assert_eq!(m1.len(), 2);
+        let m2 = ben.find_matches(&participants);
+        assert_eq!(m2.len(), 1);
+        let m3 = tom.find_matches(&participants);
+        assert_eq!(m3.len(), 0);
+    }
 
     #[rstest]
     #[case("Amy", "Amy")]
@@ -137,9 +243,9 @@ mod tests {
     #[case("Amy ", "Amy")]
     #[case("Amy !Ben ", "Amy")]
     #[case(" Amy =Tom !Ben", "Amy")]
-    fn test_parse_recipient_ok(#[case] line: &str, #[case] exp: &str) {
-        let recipient = parse_recipient(&line);
-        assert_eq!(exp, recipient.unwrap());
+    fn test_parse_participant_ok(#[case] line: &str, #[case] exp: &str) {
+        let participant = parse_participant(&line);
+        assert_eq!(exp, participant.unwrap());
     }
 
     #[rstest]
@@ -147,8 +253,8 @@ mod tests {
     #[case("")]
     #[case("!block only")]
     #[case("=force !block name")]
-    fn test_parse_recipient_err(#[case] line: &str) {
-        let res = parse_recipient(&line);
+    fn test_parse_participant_err(#[case] line: &str) {
+        let res = parse_participant(&line);
         assert!(res.is_err());
     }
 

@@ -3,8 +3,50 @@ mod participant;
 mod secretsanta;
 mod utils;
 
-pub use participant::parse_instruction;
+use error::SecretSantaError;
+use orion::aead;
+use secretsanta::SecretSanta;
+use std::collections::HashMap;
+use wasm_bindgen::prelude::*;
 
+const KEY: &[u8] = b"don't give up your secret santa";
+
+#[wasm_bindgen(catch)]
+pub fn get_secret_santas(instructions: String) -> Result<JsValue, SecretSantaError> {
+    let mut secrets: HashMap<String, String> = HashMap::new();
+
+    let mut secret_santa = SecretSanta::new();
+
+    for i in instructions.trim().split('\n') {
+        secret_santa.add_instruction(&i)?;
+    }
+    secret_santa.generate_pairings()?;
+
+    let pairings = secret_santa.get_pairings();
+
+    // encrypt the pairings
+    let key = aead::SecretKey::from_slice(&KEY).unwrap();
+
+    // TODO FINISH / FIX THIS
+    // let secrets: HashMap<String, Vec<u8>> = pairings
+    //     .iter()
+    //     .map(|(k, Some(val))| {
+    //         (
+    //             k.clone(),
+    //             aead::seal(&key, &val.clone().as_bytes()).unwrap(),
+    //         )
+    //     })
+    //     .collect();
+
+    // for (_, val) in pairings.iter_mut() {
+
+    // }
+    //     |
+    // )
+    // let cipher = Aes256CbcEnc:: ::new_from_slices(KEY, &IV).unwrap();
+
+    Ok(serde_wasm_bindgen::to_value(&secrets).unwrap())
+}
 // pub use secretsanta::SecretSanta;
 // use regex::Regex;
 // use std::collections::HashMap;
@@ -92,9 +134,24 @@ pub use participant::parse_instruction;
 // }
 
 // #[wasm_bindgen_test]
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
 
+    use crate::get_secret_santas;
+
+    use super::SecretSanta;
+    use rstest::rstest;
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_test;
+
+    #[test]
+    fn test_get_secret_santa() {
+        let instructions = "Amy\nTom !Amy\nBen =Amy\n";
+
+        let pairings = get_secret_santas(instructions.to_string());
+        assert_eq!(pairings.unwrap(), JsValue::from_str("AAA"))
+    }
+}
 //     use super::SecretSanta;
 //     use rstest::rstest;
 //     use wasm_bindgen::JsValue;
