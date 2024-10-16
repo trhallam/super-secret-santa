@@ -145,10 +145,11 @@ impl SecretSanta {
         Ok(())
     }
 
-    pub fn get_pairings(&self) -> HashMap<String, Option<String>> {
+    pub fn get_pairings(&self) -> HashMap<String, String> {
+        let u = "Undefined".to_string();
         self.participants
             .iter()
-            .map(|p| (p.name.clone(), p.paired_with.clone()))
+            .map(|p| (p.name.clone(), p.paired_with.clone().unwrap_or(u.clone())))
             .collect()
     }
 }
